@@ -1,0 +1,171 @@
+import numpy as np
+import sys
+import time
+import timeit
+import pygame
+import matplotlib.pyplot as plt
+
+G = [[10.0],[20.0]]  #2d array to define goal
+
+L = 150.0         #length of arm
+Kp = 0.1           #proportionality const. play around with this
+tolerance=5     
+lamb = 40.0          #damping constant
+vel = 100.0          #define velocity px/sec
+dt = 0.05             #sec  
+
+
+###some definitions for calculations
+e_vel = [[0.0],[0.0]]    #end effector velocity  2D array
+ang_vel = [[0.0]]         #angular velocity of the joints
+
+E = [[0.0],[0.0]]          #error
+
+
+angle=[0,0] #to calculate sum of angles in Fkine
+Jangle=[0,0] #^^ for jacobian
+angle_comp=[0.0,0.0] # first element= sum of cos components
+                      # second element = sum of sine components 
+
+Jangle_comp=[0.0,0.0]  # same as ^^ but for jacobian
+
+
+e = []
+J = [[],[]]
+
+x_time=[]
+velocity=[]
+
+error_mag = 50
+
+####
+#pygame window definitons
+background_colour = (0,174,239)
+(width, height) = (720, 640)
+
+screen = pygame.display.set_mode((width, height))
+linecolor= 255, 255, 255
+endcolor = 255,0,0
+pygame.display.set_caption('Robotics Arm - Inverse Kinematics')
+screen.fill(background_colour)
+
+
+plt.ion()
+
+#####################
+
+theta = [np.deg2rad(0.0),np.deg2rad(90.0)] #array of joint initial joint parameters
+                                                            #add more or remove some random elements
+                                                            #no of links depends on the length if this array
+######################
+
+
+
+#FK definition
+def fkine(theta):
+    for j in range(len(theta)):
+         for i in range(len(theta)-j):
+             angle[0]+=theta[i]
+             angle_comp[0]+= np.cos(angle[0])
+             angle_comp[1]+= np.sin(angle[0])
+             
+         e.append([L*angle_comp[0], L*angle_comp[1]])
+         angle_comp[0]=0.0
+         angle_comp[1]=0.0
+         angle[0]=0.0
+         angle[1]=0.0
+    e.append([0.0,0.0])
+
+# compute jacobian
+def jacobian(theta):
+    for k in range(len(theta)):
+        for j in range(len(theta)-k):    
+            for i in range(len(theta)-j):
+                Jangle[0]+=theta[i]
+            Jangle_comp[0]+= np.sin(Jangle[0])
+            Jangle_comp[1]+= np.cos(Jangle[0])
+            Jangle[0]=0.0
+            
+        J[0].append((-L)*Jangle_comp[0])
+        J[1].append(L*Jangle_comp[1])
+        Jangle_comp[0]=0.0
+        Jangle_comp[1]=0.0
+
+
+
+running = True
+while running:
+    for event in pygame.event.get():
+        if event.type == pygame.QUIT:                    #
+            running = False                               #
+            pygame.quit()                                  # event handeler to get mouse position
+            sys.exit()                                      #                           
+        if event.type == pygame.MOUSEBUTTONDOWN:             #
+            (mouseX, mouseY) = pygame.mouse.get_pos()
+            
+            G[0][0]= mouseX - width/2                           #redefining goal to mouse clicked position
+            G[1][0]= mouseY - height/2
+            plt.close()
+            fkine(theta)
+            x_timer=0.0
+            
+                           
+                
+            print "*************************************"
+            while error_mag>tolerance:
+                fkine(theta)
+                jacobian(theta)
+                Jinv=np.matrix.transpose(np.mat(J))*np.linalg.pinv((np.mat(J)*np.matrix.transpose(np.mat(J)) + np.square(lamb)*np.identity(2))) #DLS
+
+                E[0][0]= G[0][0] - e[0][0]  #error in x
+                E[1][0]= G[1][0] - e[0][1]
+            
+                error_mag=np.sqrt(np.square(E[0][0]) + np.square(E[1][0])) #px
+
+                e_vel[0][0] = (vel*E[0][0])/error_mag  # x component of end effector velocity px/sec
+                e_vel[1][0] = (vel*E[1][0])/error_mag  # y component
+
+                t=(Kp*error_mag)/vel
+                
+                ang_vel = np.asarray(np.transpose(np.dot(np.asarray(Jinv),np.asarray(e_vel))))
+
+               
+                   
+                for i in range(len(theta)):
+                    theta[i]=theta[i]+ t*ang_vel[0][i]
+
+                  
+                E[0][0]= G[0][0] - e[0][0]  #error in x
+                E[1][0]= G[1][0] - e[0][1]  #error in y
+                
+                error_mag=np.sqrt(np.square(E[0][0]) + np.square(E[1][0]))
+    
+                for i in range(len(theta)):
+                    pygame.draw.line(screen, linecolor,(e[i][0] + width/2 , e[i][1] + height/2),(e[i+1][0] + width/2 , e[i+1][1] + height/2) , 5)   
+                    pygame.draw.circle(screen, endcolor, (int(e[0][0])+width/2, int(e[0][1])+height/2 ) , 6, 0)
+                pygame.draw.circle(screen, endcolor, (int(width/2), int(height/2)) , np.int(L)*len(theta), 1)
+                pygame.display.flip()
+                time.sleep(dt)
+                screen.fill(background_colour)
+
+                for i in range(len(theta)):
+                    velocity.append([])
+                    velocity[i].append(ang_vel[0][i])
+
+                x_timer += t
+                x_time.append(x_timer)
+    
+                e = []
+                J = [[],[]]
+
+            error_mag=50  
+
+            for i in range(len(theta)):
+                plt.plot(np.array(x_time),np.array(velocity[i]))
+
+            plt.draw()
+
+            x_time=[]
+            velocity=[]
+            ang_vel=[]
+            
